@@ -29,6 +29,23 @@ const normalizeDate = (value) => {
 	return String(value);
 };
 
+// Case-insensitive cell access helper
+const getCell = (row, key) => {
+	if (!row) return undefined;
+	if (key in row) return row[key];
+	const found = Object.keys(row).find((k) => k.toLowerCase() === String(key).toLowerCase());
+	return found ? row[found] : undefined;
+};
+
+// Normalize gender values to 'Male' | 'Female' | undefined
+const normalizeGender = (val) => {
+	if (val == null) return undefined;
+	const s = String(val).trim().toLowerCase();
+	if (s === 'm' || s === 'male') return 'Male';
+	if (s === 'f' || s === 'female') return 'Female';
+	return undefined;
+};
+
 const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
 	const [wardFile, setWardFile] = useState(null);
 	const [eventFile, setEventFile] = useState(null);
@@ -45,50 +62,58 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
 					const worksheet = workbook.Sheets[sheetName];
 					const data = XLSX.utils.sheet_to_json(worksheet, { raw: false });
 
-					// Validate required fields
+					// Validate required fields (case-insensitive)
 					const requiredFields = [
 						'Name',
 						'Base School',
 						'SHS availability',
+						'Gender',
 						'Visit School Day',
 						'Best days',
 						'Blackout Dates',
 						'Neighborhood',
 						'Country'
 					];
-
-					const missingFields = requiredFields.filter(
-						(field) => !Object.keys(data[0] || {}).includes(field)
-					);
-
+					const present = new Set(Object.keys(data[0] || {}).map((k) => k.toLowerCase()));
+					const missingFields = requiredFields.filter((f) => !present.has(f.toLowerCase()))
+						// Allow empty (but present) optional fields: Visit School Day, Best days, Blackout Dates
+						.filter((f) => !['Visit School Day', 'Best days', 'Blackout Dates'].includes(f));
 					if (missingFields.length > 0) {
 						setError(`Missing required fields: ${missingFields.join(', ')}`);
 						return;
 					}
 
 					// Transform data to match our data structure
-					const transformedData = data.map((row, index) => ({
-						id: index + 1,
-						name: row['Name'],
-						baseSchool: row['Base School'],
-						willingSeniorHigh: String(row['SHS availability']).toLowerCase() === 'yes',
-						visitSchool: {
-							day: row['Visit School Day'] || null
-						},
-						preferredDays: row['Best days']
-							? String(row['Best days']).split(',').map((day) => day.trim()).filter(Boolean)
-							: [],
-						blackoutDates: row['Blackout Dates']
-							? String(row['Blackout Dates'])
-									.split(',')
-									.map((date) => normalizeDate(date.trim()))
-									.filter(Boolean)
-							: [],
-						neighborhood: row['Neighborhood'],
-						country: row['Country'],
-						hasMinimalConstraints:
-							!row['Visit School Day'] && !row['Best days'] && !row['Blackout Dates']
-					}));
+					const transformedData = data.map((row, index) => {
+						const genderRaw = getCell(row, 'Gender');
+						const gender = normalizeGender(genderRaw);
+						return {
+							id: index + 1,
+							name: getCell(row, 'Name'),
+							baseSchool: getCell(row, 'Base School'),
+							willingSeniorHigh: String(getCell(row, 'SHS availability')).toLowerCase() === 'yes',
+							gender,
+							visitSchool: {
+								day: getCell(row, 'Visit School Day') || null,
+							},
+							preferredDays: getCell(row, 'Best days')
+								? String(getCell(row, 'Best days'))
+										.split(',')
+										.map((day) => day.trim())
+										.filter(Boolean)
+								: [],
+							blackoutDates: getCell(row, 'Blackout Dates')
+								? String(getCell(row, 'Blackout Dates'))
+										.split(',')
+										.map((date) => normalizeDate(date.trim()))
+										.filter(Boolean)
+								: [],
+							neighborhood: getCell(row, 'Neighborhood'),
+							country: getCell(row, 'Country'),
+							hasMinimalConstraints:
+								!getCell(row, 'Visit School Day') && !getCell(row, 'Best days') && !getCell(row, 'Blackout Dates'),
+						};
+					});
 
 					setWardFile(file);
 					onWardDataUpload(transformedData);
@@ -174,7 +199,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
 				</Typography>
 				<Typography variant="body2" color="text.secondary" paragraph>
 					Upload an Excel file containing ward member information with the following columns:
-					Name, Base School, SHS availability, Visit School Day, Best days, Blackout Dates, Neighborhood, Country
+					Name, Base School, SHS availability, Gender, Visit School Day, Best days, Blackout Dates, Neighborhood, Country
 				</Typography>
 				<Stack direction="row" spacing={2}>
 					<Button
