@@ -1,188 +1,111 @@
-import { useState, useEffect } from 'react';
-import { 
-  Container, 
-  Paper, 
-  Typography, 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableContainer, 
-  TableHead, 
-  TableRow,
-  Box,
-  Chip,
-  Stack,
-  Tooltip
-} from '@mui/material';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { mockTeachers, mockSchoolEvents, globalBlackoutDates } from './data/mockData';
+import React, { useState } from 'react';
+import { Container, CssBaseline, ThemeProvider, createTheme, Alert } from '@mui/material';
+import FileUpload from './components/FileUpload';
+import ScheduleDisplay from './components/ScheduleDisplay';
 import { generateSchedule } from './utils/scheduler';
 
 const theme = createTheme({
   palette: {
+    mode: 'light',
     primary: {
       main: '#1976d2',
     },
     secondary: {
       main: '#dc004e',
     },
-    neighborhood: {
-      hill: '#4caf50',
-      terrace: '#ff9800',
-      scranton: '#9c27b0'
-    }
   },
 });
 
 function App() {
+  const [teachers, setTeachers] = useState([]);
+  const [events, setEvents] = useState([]);
   const [schedule, setSchedule] = useState([]);
+  const [error, setError] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  useEffect(() => {
-    const generatedSchedule = generateSchedule(mockTeachers, mockSchoolEvents, globalBlackoutDates);
-    setSchedule(generatedSchedule);
-  }, []);
+  const handleGenerateSchedule = () => {
+    try {
+      setIsGenerating(true);
+      setError('');
 
-  const getTeacherDetails = (teacherId) => {
-    return mockTeachers.find(t => t.id === teacherId);
-  };
+      // Validate that we have both teachers and events
+      if (!teachers.length || !events.length) {
+        throw new Error('Please upload both teacher and event data first');
+      }
 
-  const getNeighborhoodColor = (neighborhood) => {
-    const colors = {
-      Hill: theme.palette.neighborhood.hill,
-      Terrace: theme.palette.neighborhood.terrace,
-      Scranton: theme.palette.neighborhood.scranton
-    };
-    return colors[neighborhood] || theme.palette.primary.main;
+      // Debug log the input data
+      console.log('Teachers:', teachers);
+      console.log('Events:', events);
+
+      // Validate teacher data structure
+      teachers.forEach((teacher, index) => {
+        if (!teacher.id || !teacher.name) {
+          throw new Error(`Invalid teacher data at index ${index}: missing required fields`);
+        }
+        if (!Array.isArray(teacher.blackoutDates)) {
+          console.warn(`Teacher ${teacher.name} has invalid blackoutDates:`, teacher.blackoutDates);
+        }
+        if (!Array.isArray(teacher.preferredDays)) {
+          console.warn(`Teacher ${teacher.name} has invalid preferredDays:`, teacher.preferredDays);
+        }
+      });
+
+      // Validate event data structure
+      events.forEach((event, index) => {
+        if (!event.id || !event.date || !event.time) {
+          throw new Error(`Invalid event data at index ${index}: missing required fields`);
+        }
+        if (!Array.isArray(event.neighborhoods)) {
+          console.warn(`Event ${event.schoolName} has invalid neighborhoods:`, event.neighborhoods);
+        }
+      });
+
+      // Generate the schedule
+      const generatedSchedule = generateSchedule(teachers, events);
+      
+      // Validate the generated schedule
+      if (!Array.isArray(generatedSchedule)) {
+        throw new Error('Schedule generation failed: invalid return type');
+      }
+
+      // Check if we have assignments for all events
+      if (generatedSchedule.length !== events.length) {
+        const missingEvents = events.filter(event => 
+          !generatedSchedule.some(schedule => schedule.id === event.id)
+        );
+        throw new Error(`Could not generate assignments for events: ${missingEvents.map(e => e.schoolName).join(', ')}`);
+      }
+
+      setSchedule(generatedSchedule);
+    } catch (err) {
+      console.error('Schedule generation error:', err);
+      setError(err.message);
+      setSchedule([]);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
     <ThemeProvider theme={theme}>
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Typography variant="h3" component="h1" gutterBottom align="center">
-          School Event Schedule
-        </Typography>
-        
-        <Box sx={{ mb: 4 }}>
-          <Typography variant="h6" gutterBottom>
-            Global Blackout Dates:
-          </Typography>
-          <Stack direction="row" spacing={1}>
-            {globalBlackoutDates.map((date, index) => (
-              <Chip 
-                key={index}
-                label={`${date.start} to ${date.end}`}
-                color="secondary"
-                variant="outlined"
-              />
-            ))}
-          </Stack>
-        </Box>
-
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Date</TableCell>
-                <TableCell>School</TableCell>
-                <TableCell>Neighborhoods</TableCell>
-                <TableCell>Time</TableCell>
-                <TableCell>Leader</TableCell>
-                <TableCell>Assigned Teachers</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {schedule.map((event) => (
-                <TableRow key={event.id}>
-                  <TableCell>{event.date}</TableCell>
-                  <TableCell>{event.schoolName}</TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={1}>
-                      {event.neighborhoods.map((neighborhood, index) => (
-                        <Chip
-                          key={index}
-                          label={neighborhood}
-                          sx={{ bgcolor: getNeighborhoodColor(neighborhood), color: 'white' }}
-                          size="small"
-                        />
-                      ))}
-                    </Stack>
-                  </TableCell>
-                  <TableCell>{event.time}</TableCell>
-                  <TableCell>{event.leaderName}</TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={1} flexWrap="wrap">
-                      {event.teachers.map((teacherId) => {
-                        const teacher = getTeacherDetails(teacherId);
-                        return (
-                          <Tooltip 
-                            key={teacherId}
-                            title={`Neighborhood: ${teacher.neighborhood}`}
-                            arrow
-                          >
-                            <Chip
-                              label={`${teacher.name} (${teacher.country})`}
-                              sx={{ 
-                                borderColor: getNeighborhoodColor(teacher.neighborhood),
-                                borderWidth: 2,
-                                '&:hover': {
-                                  bgcolor: `${getNeighborhoodColor(teacher.neighborhood)}22`
-                                }
-                              }}
-                              variant="outlined"
-                              size="small"
-                              style={{ margin: '4px 0' }}
-                            />
-                          </Tooltip>
-                        );
-                      })}
-                    </Stack>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-
-        <Box sx={{ mt: 4 }}>
-          <Typography variant="h6" gutterBottom>
-            Teacher Assignment Summary:
-          </Typography>
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Teacher</TableCell>
-                  <TableCell>Base School</TableCell>
-                  <TableCell>Neighborhood</TableCell>
-                  <TableCell>Country</TableCell>
-                  <TableCell>Number of Assignments</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {mockTeachers.map((teacher) => {
-                  const assignmentCount = schedule.reduce((count, event) => 
-                    count + (event.teachers.includes(teacher.id) ? 1 : 0), 0
-                  );
-                  return (
-                    <TableRow key={teacher.id}>
-                      <TableCell>{teacher.name}</TableCell>
-                      <TableCell>{teacher.baseSchool}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={teacher.neighborhood}
-                          sx={{ bgcolor: getNeighborhoodColor(teacher.neighborhood), color: 'white' }}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>{teacher.country}</TableCell>
-                      <TableCell>{assignmentCount}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
+      <CssBaseline />
+      <Container maxWidth="xl">
+        {error && (
+          <Alert severity="error" sx={{ mt: 2, mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+        <FileUpload 
+          onWardDataUpload={setTeachers} 
+          onEventDataUpload={setEvents} 
+        />
+        <ScheduleDisplay 
+          teachers={teachers}
+          events={events}
+          schedule={schedule}
+          onGenerateSchedule={handleGenerateSchedule}
+          isGenerating={isGenerating}
+        />
       </Container>
     </ThemeProvider>
   );
