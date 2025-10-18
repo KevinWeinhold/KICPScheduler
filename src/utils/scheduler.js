@@ -13,17 +13,17 @@ const isBlackoutDate = (date, globalBlackoutDates) => {
 	});
 };
 
+const toLower = (s) => (typeof s === 'string' ? s.toLowerCase().trim() : '');
+
 // Helper function to calculate neighborhood compatibility score
 const getNeighborhoodScore = (teacherNeighborhood, schoolNeighborhoods) => {
-	const neighborhoods = Array.isArray(schoolNeighborhoods) ? schoolNeighborhoods : [];
-	if (teacherNeighborhood && neighborhoods.includes(teacherNeighborhood)) {
+	const tn = toLower(teacherNeighborhood);
+	const neighborhoods = (Array.isArray(schoolNeighborhoods) ? schoolNeighborhoods : []).map(toLower);
+	if (tn && neighborhoods.includes(tn)) {
 		return 2; // Perfect match
 	}
 	// Check for incompatible neighborhoods (Hill and Terrace)
-	if (
-		(teacherNeighborhood === 'Hill' && neighborhoods.includes('Terrace')) ||
-		(teacherNeighborhood === 'Terrace' && neighborhoods.includes('Hill'))
-	) {
+	if ((tn === 'hill' && neighborhoods.includes('terrace')) || (tn === 'terrace' && neighborhoods.includes('hill'))) {
 		return 0; // Avoid this combination if possible
 	}
 	// If teacher is from a different but not incompatible neighborhood

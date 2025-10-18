@@ -46,6 +46,18 @@ const normalizeGender = (val) => {
 	return undefined;
 };
 
+// Split a neighborhoods string into an array: supports commas, semicolons, slashes, ampersand, and 'and'
+const splitNeighborhoods = (val) => {
+	if (!val) return [];
+	if (Array.isArray(val)) return val;
+	return String(val)
+		.replace(/\band\b/gi, ',')
+		.replace(/[\/;&]/g, ',')
+		.split(',')
+		.map((s) => s.trim())
+		.filter(Boolean);
+};
+
 const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
 	const [wardFile, setWardFile] = useState(null);
 	const [eventFile, setEventFile] = useState(null);
@@ -148,9 +160,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
 						'Number of slots'
 					];
 
-					const missingFields = requiredFields.filter(
-						(field) => !Object.keys(data[0] || {}).includes(field)
-					);
+					const missingFields = requiredFields.filter((field) => !Object.keys(data[0] || {}).includes(field));
 
 					if (missingFields.length > 0) {
 						setError(`Missing required fields: ${missingFields.join(', ')}`);
@@ -158,17 +168,20 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
 					}
 
 					// Transform data to match our data structure
-					const transformedData = data.map((row, index) => ({
-						id: index + 1,
-						date: normalizeDate(row['Date']),
-						schoolName: row['School name'],
-						time: row['Day of the week'],
-						leaderName: row['Leader'],
-						schoolType: row['School type'],
-						length: row['Length'],
-						requiredSlots: parseInt(row['Number of slots']),
-						neighborhoods: [] // Populate later based on your logic
-					}));
+					const transformedData = data.map((row, index) => {
+						const neighStr = getCell(row, 'Neighborhoods') ?? getCell(row, 'Neighborhood');
+						return {
+							id: index + 1,
+							date: normalizeDate(row['Date']),
+							schoolName: row['School name'],
+							time: row['Day of the week'],
+							leaderName: row['Leader'],
+							schoolType: row['School type'],
+							length: row['Length'],
+							requiredSlots: parseInt(row['Number of slots']),
+							neighborhoods: splitNeighborhoods(neighStr),
+						};
+					});
 
 					setEventFile(file);
 					onEventDataUpload(transformedData);
@@ -236,7 +249,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
 				</Typography>
 				<Typography variant="body2" color="text.secondary" paragraph>
 					Upload an Excel file containing school event information with the following columns:
-					Day of the week, Date, School name, School type, Length, Leader, Number of slots
+					Day of the week, Date, School name, School type, Length, Leader, Number of slots, Neighborhoods (optional)
 				</Typography>
 				<Stack direction="row" spacing={2}>
 					<Button
