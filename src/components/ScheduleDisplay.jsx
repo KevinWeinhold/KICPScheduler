@@ -23,6 +23,8 @@ import {
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import DownloadIcon from '@mui/icons-material/Download';
+import { downloadSchedulesExcel } from '../utils/exportSchedules';
 
 const ScheduleTable = ({ schedule, teachers }) => (
   <TableContainer component={Paper} variant="outlined">
@@ -161,27 +163,39 @@ const ScheduleDisplay = ({
         }}
       >
         <Typography variant="h5">Schedule Overview</Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={
-            isGenerating ? (
-              <CircularProgress size={20} color="inherit" />
-            ) : hasSchedules ? (
-              <RefreshIcon />
-            ) : (
-              <PlayArrowIcon />
-            )
-          }
-          onClick={onGenerateSchedule}
-          disabled={!teachers.length || !events.length || isGenerating}
-        >
-          {isGenerating
-            ? 'Generating...'
-            : hasSchedules
-            ? 'Generate New Schedule'
-            : 'Generate Schedule'}
-        </Button>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={
+              isGenerating ? (
+                <CircularProgress size={20} color="inherit" />
+              ) : hasSchedules ? (
+                <RefreshIcon />
+              ) : (
+                <PlayArrowIcon />
+              )
+            }
+            onClick={onGenerateSchedule}
+            disabled={!teachers.length || !events.length || isGenerating}
+          >
+            {isGenerating
+              ? 'Generating...'
+              : hasSchedules
+              ? 'Generate New Schedule'
+              : 'Generate Schedule'}
+          </Button>
+          {hasSchedules && (
+            <Button
+              variant="outlined"
+              color="primary"
+              startIcon={<DownloadIcon />}
+              onClick={() => downloadSchedulesExcel(teachers, schedules)}
+            >
+              Download Excel
+            </Button>
+          )}
+        </Stack>
       </Box>
 
       {hasSchedules ? (
