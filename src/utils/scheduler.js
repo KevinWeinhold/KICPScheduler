@@ -15,6 +15,17 @@ const isBlackoutDate = (date, globalBlackoutDates) => {
 
 const toLower = (s) => (typeof s === 'string' ? s.toLowerCase().trim() : '');
 
+// Deterministic PRNG (mulberry32) so attempts are reproducible per seed
+const createRng = (seed) => {
+	let t = (Number(seed) >>> 0) || 1;
+	return () => {
+		t += 0x6d2b79f5;
+		let r = Math.imul(t ^ (t >>> 15), 1 | t);
+		r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+		return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+	};
+};
+
 // Helper function to calculate neighborhood compatibility score
 const getNeighborhoodScore = (teacherNeighborhood, schoolNeighborhoods) => {
 	const tn = toLower(teacherNeighborhood);
@@ -47,7 +58,7 @@ const isTeacherAvailable = (teacher, event, assignedSchedule, globalBlackoutDate
 		return false;
 	}
 
-	// Check if teacher is the leader of another event that day
+	// Check if teacher is the leader of this event
 	if (event?.leaderName && teacher?.name && event.leaderName === teacher.name) {
 		return false;
 	}
@@ -84,10 +95,84 @@ const isTeacherAvailable = (teacher, event, assignedSchedule, globalBlackoutDate
 	return !hasRecentAssignment;
 };
 
-// Main scheduling function
-export const generateSchedule = (teachers, events, globalBlackoutDates) => {
+/** Stable fingerprint for comparing schedules (event → sorted teacher IDs). */
+export const getScheduleFingerprint = (schedule) => {
+	if (!Array.isArray(schedule)) return '';
+	return schedule
+		.map((assignment) => {
+			const teacherIds = Array.isArray(assignment?.teachers)
+				? [...assignment.teachers].map(String).sort().join(',')
+				: '';
+			return `${assignment?.id ?? ''}:${teacherIds}`;
+		})
+		.sort()
+		.join('|');
+};
+
+/**
+ * Build a map of eventId → Set of teacherIds used in prior schedules,
+ * so regenerating can prefer different placements.
+ */
+const buildPriorAssignmentMap = (previousSchedules) => {
+	const map = new Map();
+	(Array.isArray(previousSchedules) ? previousSchedules : []).forEach((schedule) => {
+		(Array.isArray(schedule) ? schedule : []).forEach((assignment) => {
+			if (!assignment?.id || !Array.isArray(assignment.teachers)) return;
+			if (!map.has(assignment.id)) map.set(assignment.id, new Set());
+			const set = map.get(assignment.id);
+			assignment.teachers.forEach((id) => set.add(id));
+		});
+	});
+	return map;
+};
+
+/**
+ * Fraction of event slots whose teacher set differs from the most similar prior schedule.
+ * 0 = identical to some prior; 1 = every event differs.
+ */
+const differenceRatio = (candidate, previousSchedules) => {
+	if (!Array.isArray(candidate) || candidate.length === 0) return 0;
+	if (!previousSchedules?.length) return 1;
+
+	let bestOverlap = 0;
+	for (const prior of previousSchedules) {
+		if (!Array.isArray(prior)) continue;
+		const priorById = new Map(prior.map((a) => [a.id, new Set((a.teachers || []).map(String))]));
+		let matchingEvents = 0;
+		for (const assignment of candidate) {
+			const priorTeachers = priorById.get(assignment.id);
+			if (!priorTeachers) continue;
+			const current = new Set((assignment.teachers || []).map(String));
+			if (current.size === priorTeachers.size && [...current].every((id) => priorTeachers.has(id))) {
+				matchingEvents += 1;
+			}
+		}
+		const overlap = matchingEvents / candidate.length;
+		if (overlap > bestOverlap) bestOverlap = overlap;
+	}
+	return 1 - bestOverlap;
+};
+
+/**
+ * Generate one schedule. Soft preferences (neighborhood, fairness, gender, country)
+ * remain; optional seed + prior schedules nudge placements so alternatives differ.
+ *
+ * @param {object[]} teachers
+ * @param {object[]} events
+ * @param {object[]} [globalBlackoutDates]
+ * @param {{ seed?: number, previousSchedules?: object[][], variationStrength?: number }} [options]
+ */
+export const generateSchedule = (teachers, events, globalBlackoutDates, options = {}) => {
 	const teacherList = Array.isArray(teachers) ? teachers : [];
 	const eventList = Array.isArray(events) ? events : [];
+	const {
+		seed = 0,
+		previousSchedules = [],
+		variationStrength = 0,
+	} = options;
+
+	const rng = createRng(seed);
+	const priorAssignments = buildPriorAssignmentMap(previousSchedules);
 	const schedule = [];
 	const teacherAssignmentCounts = new Map(teacherList.map((t) => [t.id, 0]));
 
@@ -99,18 +184,25 @@ export const generateSchedule = (teachers, events, globalBlackoutDates) => {
 			isTeacherAvailable(teacher, event, schedule, globalBlackoutDates)
 		);
 
-		// Calculate neighborhood scores and sort teachers by compatibility
-		const teachersWithScores = availableTeachers.map((teacher) => ({
-			...teacher,
-			neighborhoodScore: getNeighborhoodScore(teacher?.neighborhood, event?.neighborhoods),
-			assignmentCount: teacherAssignmentCounts.get(teacher.id) ?? 0,
-		}));
+		const previouslyUsed = priorAssignments.get(event.id) || new Set();
 
-		// Sort teachers by neighborhood score (high to low) and then by assignment count (low to high)
+		// Calculate neighborhood scores and sort teachers by compatibility + variation
+		const teachersWithScores = availableTeachers.map((teacher) => {
+			const neighborhoodScore = getNeighborhoodScore(teacher?.neighborhood, event?.neighborhoods);
+			const assignmentCount = teacherAssignmentCounts.get(teacher.id) ?? 0;
+			const reusePenalty = previouslyUsed.has(teacher.id) ? variationStrength : 0;
+			// Small jitter mixes order among similarly scored teachers without ignoring hard constraints
+			const jitter = variationStrength > 0 ? rng() * variationStrength : 0;
+			return {
+				...teacher,
+				neighborhoodScore,
+				assignmentCount,
+				sortKey: neighborhoodScore * 10 - assignmentCount - reusePenalty + jitter,
+			};
+		});
+
 		teachersWithScores.sort((a, b) => {
-			if (b.neighborhoodScore !== a.neighborhoodScore) {
-				return b.neighborhoodScore - a.neighborhoodScore;
-			}
+			if (b.sortKey !== a.sortKey) return b.sortKey - a.sortKey;
 			return a.assignmentCount - b.assignmentCount;
 		});
 
@@ -137,16 +229,18 @@ export const generateSchedule = (teachers, events, globalBlackoutDates) => {
 		// Fill remaining spots while maintaining country diversity and preferring minimal constraints
 		const remainingCandidates = teachersWithScores.filter((t) => !selectedTeachers.includes(t.id));
 		remainingCandidates.sort((a, b) => {
-			// Prefer teachers with minimal constraints
+			const aReuse = previouslyUsed.has(a.id) ? variationStrength : 0;
+			const bReuse = previouslyUsed.has(b.id) ? variationStrength : 0;
 			const aLazy = a.hasMinimalConstraints ? 1 : 0;
 			const bLazy = b.hasMinimalConstraints ? 1 : 0;
 			if (bLazy !== aLazy) return bLazy - aLazy;
-			// Then prefer under-represented countries
-			const aCountryCount = countryCount.get(a.country) || 0;
-			const bCountryCount = countryCount.get(b.country) || 0;
+			const aCountryCount = (countryCount.get(a.country) || 0) + aReuse;
+			const bCountryCount = (countryCount.get(b.country) || 0) + bReuse;
 			if (aCountryCount !== bCountryCount) return aCountryCount - bCountryCount;
-			// Then existing assignment count (fairness)
-			return (a.assignmentCount ?? 0) - (b.assignmentCount ?? 0);
+			if (aReuse !== bReuse) return aReuse - bReuse;
+			const jitterA = variationStrength > 0 ? rng() * 0.5 : 0;
+			const jitterB = variationStrength > 0 ? rng() * 0.5 : 0;
+			return (a.assignmentCount ?? 0) + jitterA - ((b.assignmentCount ?? 0) + jitterB);
 		});
 
 		for (const teacher of remainingCandidates) {
@@ -161,7 +255,6 @@ export const generateSchedule = (teachers, events, globalBlackoutDates) => {
 				...event,
 				teachers: selectedTeachers,
 			});
-			// Update assignment counts
 			selectedTeachers.forEach((teacherId) => {
 				teacherAssignmentCounts.set(teacherId, (teacherAssignmentCounts.get(teacherId) || 0) + 1);
 			});
@@ -169,4 +262,47 @@ export const generateSchedule = (teachers, events, globalBlackoutDates) => {
 	}
 
 	return schedule;
-}; 
+};
+
+const MAX_ATTEMPTS = 40;
+const MIN_DIFFERENCE_RATIO = 0.15; // at least ~15% of events should change teacher sets
+
+/**
+ * Generate a schedule distinct from previous ones, or null if options are exhausted.
+ * First call (no previous) returns the baseline deterministic schedule.
+ *
+ * @returns {{ schedule: object[] } | { exhausted: true }}
+ */
+export const generateDistinctSchedule = (teachers, events, globalBlackoutDates, previousSchedules = []) => {
+	const priors = Array.isArray(previousSchedules) ? previousSchedules : [];
+	const knownFingerprints = new Set(priors.map(getScheduleFingerprint));
+
+	if (priors.length === 0) {
+		const schedule = generateSchedule(teachers, events, globalBlackoutDates, {
+			seed: 0,
+			previousSchedules: [],
+			variationStrength: 0,
+		});
+		return { schedule };
+	}
+
+	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+		const variationStrength = 1.5 + attempt * 0.35;
+		const seed = Date.now() + attempt * 9973;
+		const schedule = generateSchedule(teachers, events, globalBlackoutDates, {
+			seed,
+			previousSchedules: priors,
+			variationStrength,
+		});
+
+		const fingerprint = getScheduleFingerprint(schedule);
+		if (knownFingerprints.has(fingerprint)) continue;
+
+		const ratio = differenceRatio(schedule, priors);
+		if (ratio < MIN_DIFFERENCE_RATIO && attempt < MAX_ATTEMPTS - 5) continue;
+
+		return { schedule };
+	}
+
+	return { exhausted: true };
+};
