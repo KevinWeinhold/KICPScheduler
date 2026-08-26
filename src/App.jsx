@@ -8,7 +8,7 @@ import {
 } from "@mui/material";
 import FileUpload from "./components/FileUpload";
 import ScheduleDisplay from "./components/ScheduleDisplay";
-import { generateSchedule } from "./utils/scheduler";
+import { generateDistinctSchedule } from "./utils/scheduler";
 
 const theme = createTheme({
   palette: {
@@ -25,88 +25,90 @@ const theme = createTheme({
 function App() {
   const [teachers, setTeachers] = useState([]);
   const [events, setEvents] = useState([]);
-  const [schedule, setSchedule] = useState([]);
+  const [schedules, setSchedules] = useState([]);
   const [error, setError] = useState("");
+  const [infoMessage, setInfoMessage] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+
+  const validateInputs = () => {
+    if (!teachers.length || !events.length) {
+      throw new Error("Please upload both teacher and event data first");
+    }
+
+    teachers.forEach((teacher, index) => {
+      if (!teacher.id || !teacher.name) {
+        throw new Error(
+          `Invalid teacher data at index ${index}: missing required fields`,
+        );
+      }
+    });
+
+    events.forEach((event, index) => {
+      if (!event.id || !event.date || !event.time) {
+        throw new Error(
+          `Invalid event data at index ${index}: missing required fields`,
+        );
+      }
+    });
+  };
+
+  const validateGeneratedSchedule = (generatedSchedule) => {
+    if (!Array.isArray(generatedSchedule)) {
+      throw new Error("Schedule generation failed: invalid return type");
+    }
+
+    if (generatedSchedule.length !== events.length) {
+      const missingEvents = events.filter(
+        (event) =>
+          !generatedSchedule.some((assignment) => assignment.id === event.id),
+      );
+      throw new Error(
+        `Could not generate assignments for events: ${missingEvents.map((e) => e.schoolName).join(", ")}`,
+      );
+    }
+  };
 
   const handleGenerateSchedule = () => {
     try {
       setIsGenerating(true);
       setError("");
+      setInfoMessage("");
+      validateInputs();
 
-      // Validate that we have both teachers and events
-      if (!teachers.length || !events.length) {
-        throw new Error("Please upload both teacher and event data first");
-      }
+      const result = generateDistinctSchedule(teachers, events, undefined, schedules);
 
-      // Debug log the input data
-      console.log("Teachers:", teachers);
-      console.log("Events:", events);
-
-      // Validate teacher data structure
-      teachers.forEach((teacher, index) => {
-        console.log("Teacher:", teacher);
-        if (!teacher.id || !teacher.name) {
-          throw new Error(
-            `Invalid teacher data at index ${index}: missing required fields`,
-          );
-        }
-        if (!Array.isArray(teacher.blackoutDates)) {
-          console.warn(
-            `Teacher ${teacher.name} has invalid blackoutDates:`,
-            teacher.blackoutDates,
-          );
-        }
-        if (!Array.isArray(teacher.preferredDays)) {
-          console.warn(
-            `Teacher ${teacher.name} has invalid preferredDays:`,
-            teacher.preferredDays,
-          );
-        }
-      });
-
-      // Validate event data structure
-      events.forEach((event, index) => {
-        if (!event.id || !event.date || !event.time) {
-          throw new Error(
-            `Invalid event data at index ${index}: missing required fields`,
-          );
-        }
-        if (!Array.isArray(event.neighborhoods)) {
-          console.warn(
-            `Event ${event.schoolName} has invalid neighborhoods:`,
-            event.neighborhoods,
-          );
-        }
-      });
-
-      // Generate the schedule
-      const generatedSchedule = generateSchedule(teachers, events);
-
-      // Validate the generated schedule
-      if (!Array.isArray(generatedSchedule)) {
-        throw new Error("Schedule generation failed: invalid return type");
-      }
-
-      // Check if we have assignments for all events
-      if (generatedSchedule.length !== events.length) {
-        const missingEvents = events.filter(
-          (event) =>
-            !generatedSchedule.some((schedule) => schedule.id === event.id),
+      if (result.exhausted) {
+        setInfoMessage(
+          "No more distinct schedules can be generated with the current constraints. All reasonable placement options have been exhausted.",
         );
-        throw new Error(
-          `Could not generate assignments for events: ${missingEvents.map((e) => e.schoolName).join(", ")}`,
-        );
+        return;
       }
 
-      setSchedule(generatedSchedule);
+      validateGeneratedSchedule(result.schedule);
+      setSchedules((prev) => [...prev, result.schedule]);
     } catch (err) {
       console.error("Schedule generation error:", err);
       setError(err.message);
-      setSchedule([]);
+      if (schedules.length === 0) {
+        setSchedules([]);
+      }
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleWardDataUpload = (data) => {
+    setTeachers(data);
+    setSchedules([]);
+    setError("");
+    setInfoMessage("");
+  };
+
+  const handleEventDataUpload = (data) => {
+    setEvents(data);
+    setSchedules([]);
+    setError("");
+    setInfoMessage("");
   };
 
   return (
@@ -118,14 +120,19 @@ function App() {
             {error}
           </Alert>
         )}
+        {infoMessage && (
+          <Alert severity="info" sx={{ mt: 2, mb: 2 }} onClose={() => setInfoMessage("")}>
+            {infoMessage}
+          </Alert>
+        )}
         <FileUpload
-          onWardDataUpload={setTeachers}
-          onEventDataUpload={setEvents}
+          onWardDataUpload={handleWardDataUpload}
+          onEventDataUpload={handleEventDataUpload}
         />
         <ScheduleDisplay
           teachers={teachers}
           events={events}
-          schedule={schedule}
+          schedules={schedules}
           onGenerateSchedule={handleGenerateSchedule}
           isGenerating={isGenerating}
         />
