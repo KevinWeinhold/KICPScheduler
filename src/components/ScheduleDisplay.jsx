@@ -255,6 +255,7 @@ const ScheduleDisplay = ({
                   <TableCell>Neighborhood</TableCell>
                   <TableCell>Country</TableCell>
                   <TableCell>Gender</TableCell>
+                  <TableCell>Max</TableCell>
                   <TableCell>Constraints</TableCell>
                 </TableRow>
               </TableHead>
@@ -318,6 +319,7 @@ const ScheduleDisplay = ({
                         color={teacher.gender === 'Male' ? 'primary' : 'secondary'}
                       />
                     </TableCell>
+                    <TableCell>{teacher.maxEvents ?? '—'}</TableCell>
                     <TableCell>
                       <Chip
                         label={teacher.hasMinimalConstraints ? 'Minimal' : 'Full'}

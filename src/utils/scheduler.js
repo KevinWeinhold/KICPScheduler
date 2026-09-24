@@ -1,4 +1,6 @@
 import { isWithinInterval, parse, differenceInCalendarMonths } from 'date-fns';
+import { normalizeWeekday } from './weekdays';
+import { areNeighborhoodsIncompatible, neighborhoodKey } from './neighborhoods';
 
 // Helper function to check if a date is within global blackout dates
 const isBlackoutDate = (date, globalBlackoutDates) => {
@@ -26,18 +28,21 @@ const createRng = (seed) => {
 	};
 };
 
+const getTeacherMaxEvents = (teacher) => {
+	const max = Number(teacher?.maxEvents);
+	return Number.isFinite(max) && max > 0 ? max : Infinity;
+};
+
 // Helper function to calculate neighborhood compatibility score
 const getNeighborhoodScore = (teacherNeighborhood, schoolNeighborhoods) => {
-	const tn = toLower(teacherNeighborhood);
-	const neighborhoods = (Array.isArray(schoolNeighborhoods) ? schoolNeighborhoods : []).map(toLower);
+	const tn = neighborhoodKey(teacherNeighborhood);
+	const neighborhoods = (Array.isArray(schoolNeighborhoods) ? schoolNeighborhoods : []).map(neighborhoodKey);
 	if (tn && neighborhoods.includes(tn)) {
 		return 2; // Perfect match
 	}
-	// Check for incompatible neighborhoods (Hill and Terrace)
-	if ((tn === 'hill' && neighborhoods.includes('terrace')) || (tn === 'terrace' && neighborhoods.includes('hill'))) {
-		return 0; // Avoid this combination if possible
+	if (areNeighborhoodsIncompatible(teacherNeighborhood, schoolNeighborhoods)) {
+		return 0;
 	}
-	// If teacher is from a different but not incompatible neighborhood
 	return 1;
 };
 
@@ -77,7 +82,8 @@ const isTeacherAvailable = (teacher, event, assignedSchedule, globalBlackoutDate
 	// Check if it's the teacher's visit school day
 	const eventDateObj = event?.date ? new Date(event.date) : null;
 	const weekday = eventDateObj ? eventDateObj.toLocaleDateString('en-US', { weekday: 'long' }) : null;
-	if (teacher?.visitSchool?.day && weekday && teacher.visitSchool.day === weekday) {
+	const visitDay = normalizeWeekday(teacher?.visitSchool?.day);
+	if (visitDay && weekday && visitDay === weekday) {
 		return false;
 	}
 
@@ -180,30 +186,32 @@ export const generateSchedule = (teachers, events, globalBlackoutDates, options 
 	const sortedEvents = [...eventList].sort((a, b) => new Date(a?.date || 0) - new Date(b?.date || 0));
 
 	for (const event of sortedEvents) {
-		const availableTeachers = teacherList.filter((teacher) =>
-			isTeacherAvailable(teacher, event, schedule, globalBlackoutDates)
+		const availableTeachers = teacherList.filter(
+			(teacher) =>
+				isTeacherAvailable(teacher, event, schedule, globalBlackoutDates) &&
+				(teacherAssignmentCounts.get(teacher.id) ?? 0) < getTeacherMaxEvents(teacher)
 		);
 
 		const previouslyUsed = priorAssignments.get(event.id) || new Set();
 
-		// Calculate neighborhood scores and sort teachers by compatibility + variation
+		// Calculate neighborhood scores and sort teachers by assignment fairness, compatibility, and variation
 		const teachersWithScores = availableTeachers.map((teacher) => {
 			const neighborhoodScore = getNeighborhoodScore(teacher?.neighborhood, event?.neighborhoods);
 			const assignmentCount = teacherAssignmentCounts.get(teacher.id) ?? 0;
 			const reusePenalty = previouslyUsed.has(teacher.id) ? variationStrength : 0;
-			// Small jitter mixes order among similarly scored teachers without ignoring hard constraints
 			const jitter = variationStrength > 0 ? rng() * variationStrength : 0;
 			return {
 				...teacher,
 				neighborhoodScore,
 				assignmentCount,
-				sortKey: neighborhoodScore * 10 - assignmentCount - reusePenalty + jitter,
+				sortKey: neighborhoodScore * 10 - reusePenalty + jitter,
 			};
 		});
 
 		teachersWithScores.sort((a, b) => {
+			if (a.assignmentCount !== b.assignmentCount) return a.assignmentCount - b.assignmentCount;
 			if (b.sortKey !== a.sortKey) return b.sortKey - a.sortKey;
-			return a.assignmentCount - b.assignmentCount;
+			return a.id - b.id;
 		});
 
 		// Try to select a diverse group based on required slots (default 5-10)

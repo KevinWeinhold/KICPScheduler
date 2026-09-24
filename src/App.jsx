@@ -36,11 +36,16 @@ function App() {
     }
 
     teachers.forEach((teacher, index) => {
-      if (!teacher.id || !teacher.name) {
-        throw new Error(
-          `Invalid teacher data at index ${index}: missing required fields`,
-        );
-      }
+        if (!teacher.id || !teacher.name) {
+          throw new Error(
+            `Invalid teacher data at index ${index}: missing required fields`,
+          );
+        }
+        if (!Number.isFinite(teacher.maxEvents) || teacher.maxEvents < 1) {
+          throw new Error(
+            `Invalid teacher data at index ${index}: Max must be a positive number`,
+          );
+        }
     });
 
     events.forEach((event, index) => {
