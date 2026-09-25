@@ -8,7 +8,7 @@ import {
 } from "@mui/material";
 import FileUpload from "./components/FileUpload";
 import ScheduleDisplay from "./components/ScheduleDisplay";
-import { generateDistinctSchedule } from "./utils/scheduler";
+import { generateDistinctSchedule, describeEventFillGap } from "./utils/scheduler";
 
 const theme = createTheme({
   palette: {
@@ -36,16 +36,16 @@ function App() {
     }
 
     teachers.forEach((teacher, index) => {
-        if (!teacher.id || !teacher.name) {
-          throw new Error(
-            `Invalid teacher data at index ${index}: missing required fields`,
-          );
-        }
-        if (!Number.isFinite(teacher.maxEvents) || teacher.maxEvents < 1) {
-          throw new Error(
-            `Invalid teacher data at index ${index}: Max must be a positive number`,
-          );
-        }
+      if (!teacher.id || !teacher.name) {
+        throw new Error(
+          `Invalid teacher data at index ${index}: missing required fields`,
+        );
+      }
+      if (!Number.isFinite(teacher.maxEvents) || teacher.maxEvents < 1) {
+        throw new Error(
+          `Invalid teacher data at index ${index}: Max must be a positive number`,
+        );
+      }
     });
 
     events.forEach((event, index) => {
@@ -63,12 +63,36 @@ function App() {
     }
 
     if (generatedSchedule.length !== events.length) {
+      const teacherAssignmentCounts = new Map(teachers.map((t) => [t.id, 0]));
+      generatedSchedule.forEach((assignment) => {
+        (assignment.teachers || []).forEach((teacherId) => {
+          teacherAssignmentCounts.set(
+            teacherId,
+            (teacherAssignmentCounts.get(teacherId) || 0) + 1,
+          );
+        });
+      });
+
       const missingEvents = events.filter(
         (event) =>
           !generatedSchedule.some((assignment) => assignment.id === event.id),
       );
+
+      const details = missingEvents
+        .map((event) => {
+          const gap = describeEventFillGap(
+            teachers,
+            event,
+            generatedSchedule,
+            undefined,
+            teacherAssignmentCounts,
+          );
+          return `${gap.schoolName} (${gap.date}): needs ${gap.requiredSlots}, strict eligible ${gap.strictEligible}, relaxed eligible ${gap.relaxedEligible}. Top blockers: ${gap.topBlockers || "none"}`;
+        })
+        .join(" | ");
+
       throw new Error(
-        `Could not generate assignments for events: ${missingEvents.map((e) => e.schoolName).join(", ")}`,
+        `Could not generate assignments for events: ${missingEvents.map((e) => e.schoolName).join(", ")}. ${details}`,
       );
     }
   };
@@ -80,7 +104,12 @@ function App() {
       setInfoMessage("");
       validateInputs();
 
-      const result = generateDistinctSchedule(teachers, events, undefined, schedules);
+      const result = generateDistinctSchedule(
+        teachers,
+        events,
+        undefined,
+        schedules,
+      );
 
       if (result.exhausted) {
         setInfoMessage(
@@ -126,7 +155,11 @@ function App() {
           </Alert>
         )}
         {infoMessage && (
-          <Alert severity="info" sx={{ mt: 2, mb: 2 }} onClose={() => setInfoMessage("")}>
+          <Alert
+            severity="info"
+            sx={{ mt: 2, mb: 2 }}
+            onClose={() => setInfoMessage("")}
+          >
             {infoMessage}
           </Alert>
         )}
