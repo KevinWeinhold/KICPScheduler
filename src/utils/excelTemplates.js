@@ -7,11 +7,12 @@ export const generateWardTemplate = () => {
       'Base School': 'Maple High School',
       'SHS availability': 'Yes',
       'Visit School Day': 'Monday',
-      'Best days': 'Tuesday, Wednesday, Thursday',
+      'Best days': 'Tuesday;Wednesday;Thursday',
       'Blackout Dates': '2025-06-10, 2025-10-15',
-      'Neighborhood': 'Hill',
+      'Neighborhood': 'Hanayama',
       'Country': 'USA',
-      'Gender': 'Male'
+      'Gender': 'Male',
+      'Max': '3'
     },
     {
       'Name': 'Garcia, Maria',
@@ -20,9 +21,10 @@ export const generateWardTemplate = () => {
       'Visit School Day': '',  // Example of empty visit school day
       'Best days': '',         // Example of empty preferred days
       'Blackout Dates': '',    // Example of empty blackout dates
-      'Neighborhood': 'Terrace',
+      'Neighborhood': 'Tamondai',
       'Country': 'Spain',
-      'Gender': 'Female'
+      'Gender': 'Female',
+      'Max': '2'
     }
   ];
 
@@ -40,7 +42,8 @@ export const generateWardTemplate = () => {
     { wch: 30 }, // Blackout Dates
     { wch: 15 }, // Neighborhood
     { wch: 15 }, // Country
-    { wch: 10 }  // Gender
+    { wch: 10 }, // Gender
+    { wch: 8 }   // Max
   ];
   ws['!cols'] = wscols;
 

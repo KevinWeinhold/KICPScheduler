@@ -4,6 +4,8 @@ import { Box, Button, Typography, Paper, Alert, Stack } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import DownloadIcon from "@mui/icons-material/Download";
 import { downloadTemplate } from "../utils/excelTemplates";
+import { normalizeWeekday, normalizeWeekdayList } from "../utils/weekdays";
+import { normalizeNeighborhood, normalizeNeighborhoodList } from "../utils/neighborhoods";
 
 // Normalize a value into YYYY-MM-DD
 const pad2 = (n) => (n < 10 ? `0${n}` : `${n}`);
@@ -49,18 +51,6 @@ const normalizeGender = (val) => {
   return undefined;
 };
 
-// Split a neighborhoods string into an array: supports commas, semicolons, slashes, ampersand, and 'and'
-const splitNeighborhoods = (val) => {
-  if (!val) return [];
-  if (Array.isArray(val)) return val;
-  return String(val)
-    .replace(/\band\b/gi, ",")
-    .replace(/[\/;&]/g, ",")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-};
-
 const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
   const [wardFile, setWardFile] = useState(null);
   const [eventFile, setEventFile] = useState(null);
@@ -91,6 +81,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
             "Blackout Dates",
             "Neighborhood",
             "Country",
+            "Max",
           ];
           const present = new Set(
             Object.keys(data[0] || {}).map((k) => k.toLowerCase()),
@@ -113,29 +104,35 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
           const transformedData = data.map((row, index) => {
             const genderRaw = getCell(row, "Gender");
             const gender = normalizeGender(genderRaw);
+            const maxRaw = getCell(row, "Max");
+            const maxEvents = parseInt(String(maxRaw ?? "").trim(), 10);
+            if (!Number.isFinite(maxEvents) || maxEvents < 1) {
+              throw new Error(
+                `Invalid Max value for ${getCell(row, "Name") || `row ${index + 1}`}: expected a positive number`,
+              );
+            }
             return {
               id: index + 1,
               name: getCell(row, "Name"),
               baseSchool: getCell(row, "Base School"),
               willingSeniorHigh:
-                String(getCell(row, "SHS availability")).toLowerCase() === "y",
+                String(getCell(row, "SHS availability")).toLowerCase() ===
+                "yes",
               gender,
+              maxEvents,
               visitSchool: {
-                day: getCell(row, "Visit School Day") || null,
+                day: getCell(row, "Visit School Day")
+                  ? normalizeWeekday(getCell(row, "Visit School Day"))
+                  : null,
               },
-              preferredDays: getCell(row, "Best days")
-                ? String(getCell(row, "Best days"))
-                    .split(",")
-                    .map((day) => day.trim())
-                    .filter(Boolean)
-                : [],
+              preferredDays: normalizeWeekdayList(getCell(row, "Best days")),
               blackoutDates: getCell(row, "Blackout Dates")
                 ? String(getCell(row, "Blackout Dates"))
-                    .split(",")
+                    .split(/[,;]/)
                     .map((date) => normalizeDate(date.trim()))
                     .filter(Boolean)
                 : [],
-              neighborhood: getCell(row, "Neighborhood"),
+              neighborhood: normalizeNeighborhood(getCell(row, "Neighborhood")),
               country: getCell(row, "Country"),
               hasMinimalConstraints:
                 !getCell(row, "Visit School Day") &&
@@ -202,7 +199,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
               schoolType: row["School type"],
               length: row["Length"],
               requiredSlots: parseInt(row["Number of slots"]),
-              neighborhoods: splitNeighborhoods(neighStr),
+              neighborhoods: normalizeNeighborhoodList(neighStr),
             };
           });
 
@@ -236,7 +233,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
         <Typography variant="body2" color="text.secondary" paragraph>
           Upload an Excel file containing ward member information with the
           following columns: Name, Base School, SHS availability, Gender, Visit
-          School Day, Best days, Blackout Dates, Neighborhood, Country
+          School Day, Best days, Blackout Dates, Neighborhood, Country, Max
         </Typography>
         <Stack direction="row" spacing={2}>
           <Button

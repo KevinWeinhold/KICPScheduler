@@ -84,6 +84,18 @@ const ScheduleTable = ({ schedule, teachers }) => (
               </TableCell>
               <TableCell>{assignment.leaderName}</TableCell>
               <TableCell>
+                {(assignment.partialFill || assignment.suboptimalFill) && (
+                  <Chip
+                    label={
+                      assignment.partialFill
+                        ? `Partial (${assignment.teachers.length}/${assignment.targetSlots ?? '?'})`
+                        : 'Sub-optimal fill'
+                    }
+                    size="small"
+                    color="warning"
+                    sx={{ mb: 0.5 }}
+                  />
+                )}
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                   {assignedTeachers.map((teacher) => (
                     <Tooltip
@@ -255,6 +267,7 @@ const ScheduleDisplay = ({
                   <TableCell>Neighborhood</TableCell>
                   <TableCell>Country</TableCell>
                   <TableCell>Gender</TableCell>
+                  <TableCell>Max</TableCell>
                   <TableCell>Constraints</TableCell>
                 </TableRow>
               </TableHead>
@@ -318,6 +331,7 @@ const ScheduleDisplay = ({
                         color={teacher.gender === 'Male' ? 'primary' : 'secondary'}
                       />
                     </TableCell>
+                    <TableCell>{teacher.maxEvents ?? '—'}</TableCell>
                     <TableCell>
                       <Chip
                         label={teacher.hasMinimalConstraints ? 'Minimal' : 'Full'}

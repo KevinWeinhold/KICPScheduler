@@ -20,6 +20,7 @@ const buildMemberSummaryRows = (teachers, schedules) =>
 			Neighborhood: teacher.neighborhood,
 			Country: teacher.country,
 			Gender: teacher.gender,
+			Max: teacher.maxEvents ?? '',
 			Constraints: teacher.hasMinimalConstraints ? 'Minimal' : 'Full',
 		};
 
@@ -72,6 +73,7 @@ const memberSummaryColumnWidths = (scheduleCount) => {
 		{ wch: 14 }, // Neighborhood
 		{ wch: 14 }, // Country
 		{ wch: 10 }, // Gender
+		{ wch: 8 },  // Max
 		{ wch: 12 }, // Constraints
 	];
 
