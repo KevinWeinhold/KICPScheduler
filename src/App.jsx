@@ -8,7 +8,7 @@ import {
 } from "@mui/material";
 import FileUpload from "./components/FileUpload";
 import ScheduleDisplay from "./components/ScheduleDisplay";
-import { generateDistinctSchedule } from "./utils/scheduler";
+import { generateDistinctSchedule, describeEventFillGap } from "./utils/scheduler";
 
 const theme = createTheme({
   palette: {
@@ -62,8 +62,21 @@ function App() {
         (event) =>
           !generatedSchedule.some((assignment) => assignment.id === event.id),
       );
+
+      const details = missingEvents
+        .map((event) => {
+          const gap = describeEventFillGap(
+            teachers,
+            event,
+            generatedSchedule,
+            undefined,
+          );
+          return `${gap.schoolName} (${gap.date}${gap.ward ? `, ${gap.ward}` : ""}): needs ${gap.requiredSlots} slots, but only ${gap.strictEligible} eligible under normal rules (${gap.relaxedEligible} if month-spacing is relaxed). Top blockers: ${gap.topBlockers || "none identified"}. Preferred days are preferences only and do not block assignment.`;
+        })
+        .join(" | ");
+
       throw new Error(
-        `Could not generate assignments for events: ${missingEvents.map((e) => e.schoolName).join(", ")}`,
+        `Could not generate assignments for events: ${missingEvents.map((e) => e.schoolName).join(", ")}. ${details}`,
       );
     }
   };

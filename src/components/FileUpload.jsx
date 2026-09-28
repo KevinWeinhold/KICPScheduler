@@ -91,6 +91,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
             "Blackout Dates",
             "Neighborhood",
             "Country",
+            "Ward",
           ];
           const present = new Set(
             Object.keys(data[0] || {}).map((k) => k.toLowerCase()),
@@ -113,25 +114,28 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
           const transformedData = data.map((row, index) => {
             const genderRaw = getCell(row, "Gender");
             const gender = normalizeGender(genderRaw);
+            const shsRaw = String(getCell(row, "SHS availability") ?? "")
+              .trim()
+              .toLowerCase();
             return {
               id: index + 1,
               name: getCell(row, "Name"),
               baseSchool: getCell(row, "Base School"),
-              willingSeniorHigh:
-                String(getCell(row, "SHS availability")).toLowerCase() === "y",
+              willingSeniorHigh: shsRaw === "yes" || shsRaw === "y",
               gender,
+              ward: String(getCell(row, "Ward") ?? "").trim(),
               visitSchool: {
                 day: getCell(row, "Visit School Day") || null,
               },
               preferredDays: getCell(row, "Best days")
                 ? String(getCell(row, "Best days"))
-                    .split(",")
+                    .split(/[,;]/)
                     .map((day) => day.trim())
                     .filter(Boolean)
                 : [],
               blackoutDates: getCell(row, "Blackout Dates")
                 ? String(getCell(row, "Blackout Dates"))
-                    .split(",")
+                    .split(/[,;]/)
                     .map((date) => normalizeDate(date.trim()))
                     .filter(Boolean)
                 : [],
@@ -169,7 +173,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
           const worksheet = workbook.Sheets[sheetName];
           const data = XLSX.utils.sheet_to_json(worksheet, { raw: false });
 
-          // Validate required fields
+          // Validate required fields (case-insensitive)
           const requiredFields = [
             "Day of the week",
             "Date",
@@ -178,10 +182,13 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
             "Length",
             "Leader",
             "Number of slots",
+            "Ward",
           ];
-
+          const present = new Set(
+            Object.keys(data[0] || {}).map((k) => k.toLowerCase()),
+          );
           const missingFields = requiredFields.filter(
-            (field) => !Object.keys(data[0] || {}).includes(field),
+            (field) => !present.has(field.toLowerCase()),
           );
 
           if (missingFields.length > 0) {
@@ -195,14 +202,15 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
               getCell(row, "Neighborhoods") ?? getCell(row, "Neighborhood");
             return {
               id: index + 1,
-              date: normalizeDate(row["Date"]),
-              schoolName: row["School name"],
-              time: row["Day of the week"],
-              leaderName: row["Leader"],
-              schoolType: row["School type"],
-              length: row["Length"],
-              requiredSlots: parseInt(row["Number of slots"]),
+              date: normalizeDate(getCell(row, "Date")),
+              schoolName: getCell(row, "School name"),
+              time: getCell(row, "Day of the week"),
+              leaderName: getCell(row, "Leader"),
+              schoolType: getCell(row, "School type"),
+              length: getCell(row, "Length"),
+              requiredSlots: parseInt(getCell(row, "Number of slots"), 10),
               neighborhoods: splitNeighborhoods(neighStr),
+              ward: String(getCell(row, "Ward") ?? "").trim(),
             };
           });
 
@@ -236,7 +244,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
         <Typography variant="body2" color="text.secondary" paragraph>
           Upload an Excel file containing ward member information with the
           following columns: Name, Base School, SHS availability, Gender, Visit
-          School Day, Best days, Blackout Dates, Neighborhood, Country
+          School Day, Best days, Blackout Dates, Neighborhood, Country, Ward
         </Typography>
         <Stack direction="row" spacing={2}>
           <Button
@@ -274,7 +282,7 @@ const FileUpload = ({ onWardDataUpload, onEventDataUpload }) => {
         <Typography variant="body2" color="text.secondary" paragraph>
           Upload an Excel file containing school event information with the
           following columns: Day of the week, Date, School name, School type,
-          Length, Leader, Number of slots, Neighborhoods (optional)
+          Length, Leader, Number of slots, Ward, Neighborhoods (optional)
         </Typography>
         <Stack direction="row" spacing={2}>
           <Button
