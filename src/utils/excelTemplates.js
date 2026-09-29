@@ -12,28 +12,29 @@ export const generateWardTemplate = () => {
       'Neighborhood': 'Hanayama',
       'Country': 'USA',
       'Gender': 'Male',
-      'Max': '3'
+      'Max': '3',
+      'Ward': 'Ward 1'
     },
     {
       'Name': 'Garcia, Maria',
       'Base School': 'Oak Middle School',
       'SHS availability': 'No',
-      'Visit School Day': '',  // Example of empty visit school day
-      'Best days': '',         // Example of empty preferred days
-      'Blackout Dates': '',    // Example of empty blackout dates
+      'Visit School Day': '',
+      'Best days': '',
+      'Blackout Dates': '',
       'Neighborhood': 'Tamondai',
       'Country': 'Spain',
       'Gender': 'Female',
-      'Max': '2'
+      'Max': '2',
+      'Ward': 'Ward 2'
     }
   ];
 
   const ws = XLSX.utils.json_to_sheet(template);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Ward Members');
-  
-  // Add column widths
-  const wscols = [
+
+  ws['!cols'] = [
     { wch: 20 }, // Name
     { wch: 25 }, // Base School
     { wch: 15 }, // SHS availability
@@ -43,9 +44,9 @@ export const generateWardTemplate = () => {
     { wch: 15 }, // Neighborhood
     { wch: 15 }, // Country
     { wch: 10 }, // Gender
-    { wch: 8 }   // Max
+    { wch: 8 },  // Max
+    { wch: 12 }, // Ward
   ];
-  ws['!cols'] = wscols;
 
   return wb;
 };
@@ -59,25 +60,27 @@ export const generateEventTemplate = () => {
       'School type': 'SHS',
       'Length': 'Full day',
       'Leader': 'John Smith',
-      'Number of slots': '3'
+      'Number of slots': '5',
+      'Neighborhoods': 'Hanayama',
+      'Ward': 'Ward 1'
     }
   ];
 
   const ws = XLSX.utils.json_to_sheet(template);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'School Events');
-  
-  // Add column widths
-  const wscols = [
+
+  ws['!cols'] = [
     { wch: 15 }, // Day of the week
     { wch: 15 }, // Date
     { wch: 25 }, // School name
     { wch: 15 }, // School type
     { wch: 15 }, // Length
     { wch: 20 }, // Leader
-    { wch: 15 }  // Number of slots
+    { wch: 15 }, // Number of slots
+    { wch: 20 }, // Neighborhoods
+    { wch: 12 }, // Ward
   ];
-  ws['!cols'] = wscols;
 
   return wb;
 };
@@ -86,4 +89,4 @@ export const downloadTemplate = (type) => {
   const wb = type === 'ward' ? generateWardTemplate() : generateEventTemplate();
   const fileName = type === 'ward' ? 'ward_members_template.xlsx' : 'school_events_template.xlsx';
   XLSX.writeFile(wb, fileName);
-}; 
+};

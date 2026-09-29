@@ -87,7 +87,7 @@ function App() {
             undefined,
             teacherAssignmentCounts,
           );
-          return `${gap.schoolName} (${gap.date}): needs ${gap.requiredSlots}, strict eligible ${gap.strictEligible}, relaxed eligible ${gap.relaxedEligible}. Top blockers: ${gap.topBlockers || "none"}`;
+          return `${gap.schoolName} (${gap.date}${gap.ward ? `, ${gap.ward}` : ""}): needs ${gap.requiredSlots} slots, but only ${gap.strictEligible} eligible under normal rules (${gap.relaxedEligible} if month-spacing is relaxed). Top blockers: ${gap.topBlockers || "none identified"}. Preferred days and ward/neighborhood are preferences only and do not block assignment.`;
         })
         .join(" | ");
 

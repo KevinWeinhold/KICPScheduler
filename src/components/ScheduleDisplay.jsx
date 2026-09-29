@@ -39,6 +39,7 @@ const ScheduleTable = ({ schedule, teachers }) => (
           <TableCell>Leader</TableCell>
           <TableCell>Assigned Teachers</TableCell>
           <TableCell>Gender Balance</TableCell>
+          <TableCell>Ward Match</TableCell>
           <TableCell>Neighborhood Match</TableCell>
         </TableRow>
       </TableHead>
@@ -54,8 +55,28 @@ const ScheduleTable = ({ schedule, teachers }) => (
           }, {});
 
           const neighborhoodMatch = assignedTeachers.filter((teacher) =>
-            assignment.neighborhoods.includes(teacher.neighborhood)
+            (assignment.neighborhoods || []).includes(teacher.neighborhood)
           ).length;
+
+          const wardMatch = assignedTeachers.filter(
+            (teacher) =>
+              teacher.ward &&
+              assignment.ward &&
+              String(teacher.ward).toLowerCase().trim() ===
+                String(assignment.ward).toLowerCase().trim()
+          ).length;
+
+          const fillLabel = assignment.partialFill
+            ? `Partial (${assignment.teachers.length}/${assignment.targetSlots ?? '?'})`
+            : assignment.fillStrategy === 'relaxed_preferred_days'
+            ? 'Non-preferred days used'
+            : assignment.fillStrategy === 'relaxed_spacing'
+            ? 'Relaxed month spacing'
+            : assignment.fillStrategy === 'relaxed_all_soft'
+            ? 'Relaxed soft prefs'
+            : assignment.suboptimalFill
+            ? 'Sub-optimal fill'
+            : null;
 
           return (
             <TableRow key={assignment.id}>
@@ -84,23 +105,19 @@ const ScheduleTable = ({ schedule, teachers }) => (
               </TableCell>
               <TableCell>{assignment.leaderName}</TableCell>
               <TableCell>
-                {(assignment.partialFill || assignment.suboptimalFill) && (
+                {fillLabel && (
                   <Chip
-                    label={
-                      assignment.partialFill
-                        ? `Partial (${assignment.teachers.length}/${assignment.targetSlots ?? '?'})`
-                        : 'Sub-optimal fill'
-                    }
+                    label={fillLabel}
                     size="small"
                     color="warning"
-                    sx={{ mb: 0.5 }}
+                    sx={{ mb: 0.5, mr: 0.5 }}
                   />
                 )}
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                   {assignedTeachers.map((teacher) => (
                     <Tooltip
                       key={teacher.id}
-                      title={`Neighborhood: ${teacher.neighborhood}, Country: ${teacher.country}, Gender: ${teacher.gender}`}
+                      title={`Ward: ${teacher.ward || '—'}, Neighborhood: ${teacher.neighborhood}, Country: ${teacher.country}, Gender: ${teacher.gender}, Max: ${teacher.maxEvents ?? '—'}`}
                     >
                       <Chip label={teacher.name} size="small" variant="outlined" />
                     </Tooltip>
@@ -122,6 +139,19 @@ const ScheduleTable = ({ schedule, teachers }) => (
                     variant="outlined"
                   />
                 </Stack>
+              </TableCell>
+              <TableCell>
+                <Chip
+                  label={`${wardMatch}/${assignedTeachers.length}`}
+                  size="small"
+                  color={
+                    assignedTeachers.length > 0 && wardMatch === assignedTeachers.length
+                      ? 'success'
+                      : wardMatch > 0
+                      ? 'warning'
+                      : 'default'
+                  }
+                />
               </TableCell>
               <TableCell>
                 <Chip
@@ -259,6 +289,7 @@ const ScheduleDisplay = ({
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
+                  <TableCell>Ward</TableCell>
                   <TableCell>Base School</TableCell>
                   <TableCell>SHS Available</TableCell>
                   <TableCell>Visit School Day</TableCell>
@@ -275,6 +306,9 @@ const ScheduleDisplay = ({
                 {teachers.map((teacher) => (
                   <TableRow key={teacher.id}>
                     <TableCell>{teacher.name}</TableCell>
+                    <TableCell>
+                      <Chip label={teacher.ward || '—'} size="small" variant="outlined" />
+                    </TableCell>
                     <TableCell>{teacher.baseSchool}</TableCell>
                     <TableCell>
                       <Chip
@@ -359,6 +393,7 @@ const ScheduleDisplay = ({
                   <TableCell>Date</TableCell>
                   <TableCell>Day</TableCell>
                   <TableCell>School</TableCell>
+                  <TableCell>Ward</TableCell>
                   <TableCell>Type</TableCell>
                   <TableCell>Length</TableCell>
                   <TableCell>Leader</TableCell>
@@ -372,6 +407,9 @@ const ScheduleDisplay = ({
                     <TableCell>{event.date}</TableCell>
                     <TableCell>{event.time}</TableCell>
                     <TableCell>{event.schoolName}</TableCell>
+                    <TableCell>
+                      <Chip label={event.ward || '—'} size="small" variant="outlined" />
+                    </TableCell>
                     <TableCell>
                       <Chip
                         label={event.schoolType}
