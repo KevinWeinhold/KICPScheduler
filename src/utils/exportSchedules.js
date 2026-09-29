@@ -12,6 +12,7 @@ const buildMemberSummaryRows = (teachers, schedules) =>
 	teachers.map((teacher) => {
 		const row = {
 			Name: teacher.name,
+			Ward: teacher.ward || '',
 			'Base School': teacher.baseSchool,
 			'SHS Available': teacher.willingSeniorHigh ? 'Yes' : 'No',
 			'Visit School Day': teacher.visitSchool?.day || '',
@@ -48,9 +49,17 @@ const buildScheduleRows = (schedule, teachers) =>
 			(assignment.neighborhoods || []).includes(teacher.neighborhood)
 		).length;
 
+		const wardMatch = assignedTeachers.filter(
+			(teacher) =>
+				teacher.ward &&
+				assignment.ward &&
+				String(teacher.ward).toLowerCase().trim() === String(assignment.ward).toLowerCase().trim()
+		).length;
+
 		return {
 			Date: assignment.date,
 			School: assignment.schoolName,
+			Ward: assignment.ward || '',
 			Day: assignment.time,
 			Type: assignment.schoolType,
 			Length: assignment.length,
@@ -58,6 +67,7 @@ const buildScheduleRows = (schedule, teachers) =>
 			'Assigned Teachers': assignedTeachers.map((t) => t.name).join(', '),
 			'Male Count': genderCount.Male || 0,
 			'Female Count': genderCount.Female || 0,
+			'Ward Match': `${wardMatch}/${assignedTeachers.length}`,
 			'Neighborhood Match': `${neighborhoodMatch}/${assignedTeachers.length}`,
 		};
 	});
@@ -65,6 +75,7 @@ const buildScheduleRows = (schedule, teachers) =>
 const memberSummaryColumnWidths = (scheduleCount) => {
 	const widths = [
 		{ wch: 22 }, // Name
+		{ wch: 12 }, // Ward
 		{ wch: 25 }, // Base School
 		{ wch: 14 }, // SHS Available
 		{ wch: 16 }, // Visit School Day
@@ -78,8 +89,8 @@ const memberSummaryColumnWidths = (scheduleCount) => {
 	];
 
 	for (let i = 0; i < scheduleCount; i++) {
-		widths.push({ wch: 45 }); // Assignments
-		widths.push({ wch: 16 }); // Count
+		widths.push({ wch: 45 });
+		widths.push({ wch: 16 });
 	}
 	return widths;
 };
@@ -88,12 +99,14 @@ const scheduleColumnWidths = [
 	{ wch: 12 },
 	{ wch: 25 },
 	{ wch: 12 },
+	{ wch: 12 },
 	{ wch: 10 },
 	{ wch: 12 },
 	{ wch: 20 },
 	{ wch: 40 },
 	{ wch: 12 },
 	{ wch: 12 },
+	{ wch: 14 },
 	{ wch: 18 },
 ];
 

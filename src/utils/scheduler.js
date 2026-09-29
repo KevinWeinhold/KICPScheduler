@@ -2,7 +2,6 @@ import { isWithinInterval, parse, differenceInCalendarMonths } from 'date-fns';
 import { normalizeWeekday } from './weekdays';
 import { areNeighborhoodsIncompatible, neighborhoodKey } from './neighborhoods';
 
-// Helper function to check if a date is within global blackout dates
 const isBlackoutDate = (date, globalBlackoutDates) => {
 	if (!date) return false;
 	if (!Array.isArray(globalBlackoutDates) || globalBlackoutDates.length === 0) return false;
@@ -17,7 +16,6 @@ const isBlackoutDate = (date, globalBlackoutDates) => {
 
 const toLower = (s) => (typeof s === 'string' ? s.toLowerCase().trim() : '');
 
-// Deterministic PRNG (mulberry32) so attempts are reproducible per seed
 const createRng = (seed) => {
 	let t = (Number(seed) >>> 0) || 1;
 	return () => {
@@ -33,12 +31,32 @@ const getTeacherMaxEvents = (teacher) => {
 	return Number.isFinite(max) && max > 0 ? max : Infinity;
 };
 
-// Helper function to calculate neighborhood compatibility score
+const resolveRequiredSlots = (event) => {
+	const n = Number(event?.requiredSlots);
+	if (!Number.isFinite(n) || n < 1) return 5;
+	return Math.min(10, Math.max(1, Math.floor(n)));
+};
+
+const getEventWeekday = (event) => {
+	if (!event?.date) return null;
+	const parsed = parse(String(event.date), 'yyyy-MM-dd', new Date());
+	if (Number.isNaN(parsed.getTime())) return null;
+	return parsed.toLocaleDateString('en-US', { weekday: 'long' });
+};
+
+/** Soft ward match — never a hard block. */
+const getWardScore = (teacherWard, eventWard) => {
+	const tw = toLower(teacherWard);
+	const ew = toLower(eventWard);
+	if (!tw || !ew) return 0;
+	return tw === ew ? 1 : 0;
+};
+
 const getNeighborhoodScore = (teacherNeighborhood, schoolNeighborhoods) => {
 	const tn = neighborhoodKey(teacherNeighborhood);
 	const neighborhoods = (Array.isArray(schoolNeighborhoods) ? schoolNeighborhoods : []).map(neighborhoodKey);
 	if (tn && neighborhoods.includes(tn)) {
-		return 2; // Perfect match
+		return 2;
 	}
 	if (areNeighborhoodsIncompatible(teacherNeighborhood, schoolNeighborhoods)) {
 		return 0;
@@ -46,19 +64,30 @@ const getNeighborhoodScore = (teacherNeighborhood, schoolNeighborhoods) => {
 	return 1;
 };
 
-const resolveRequiredSlots = (event) => {
-	const n = Number(event?.requiredSlots);
-	if (!Number.isFinite(n) || n < 1) return 5;
-	return Math.min(10, Math.max(1, Math.floor(n)));
+/** Soft preference only — never blocks assignment. */
+const getPreferredDayScore = (teacher, event) => {
+	const preferred = Array.isArray(teacher?.preferredDays) ? teacher.preferredDays : [];
+	if (!preferred.length) return 0.5;
+	const weekday = getEventWeekday(event);
+	if (!weekday) return 0;
+	const match = preferred.some((day) => toLower(normalizeWeekday(day)) === toLower(weekday));
+	return match ? 1 : 0;
 };
 
-/** Hard availability checks; monthly spacing can be relaxed in fallback passes. */
+/**
+ * Hard availability. Monthly spacing can be relaxed on fallback passes.
+ * Preferred days and ward/neighborhood are never hard blocks. Max is enforced by caller.
+ */
 const isTeacherAvailable = (teacher, event, assignedSchedule, globalBlackoutDates, options = {}) => {
 	const { relaxMonthlySpacing = false } = options;
 	const schedule = Array.isArray(assignedSchedule) ? assignedSchedule : [];
+
 	if (
 		schedule.some(
-			(assignment) => assignment?.date === event?.date && Array.isArray(assignment?.teachers) && assignment.teachers.includes(teacher.id)
+			(assignment) =>
+				assignment?.date === event?.date &&
+				Array.isArray(assignment?.teachers) &&
+				assignment.teachers.includes(teacher.id)
 		)
 	) {
 		return false;
@@ -81,8 +110,7 @@ const isTeacherAvailable = (teacher, event, assignedSchedule, globalBlackoutDate
 		return false;
 	}
 
-	const eventDateObj = event?.date ? new Date(event.date) : null;
-	const weekday = eventDateObj ? eventDateObj.toLocaleDateString('en-US', { weekday: 'long' }) : null;
+	const weekday = getEventWeekday(event);
 	const visitDay = normalizeWeekday(teacher?.visitSchool?.day);
 	if (visitDay && weekday && visitDay === weekday) {
 		return false;
@@ -104,14 +132,24 @@ const isTeacherAvailable = (teacher, event, assignedSchedule, globalBlackoutDate
 	return true;
 };
 
-const getTeacherBlockingReason = (teacher, event, assignedSchedule, globalBlackoutDates, teacherAssignmentCounts, options = {}) => {
+const getTeacherBlockingReason = (
+	teacher,
+	event,
+	assignedSchedule,
+	globalBlackoutDates,
+	teacherAssignmentCounts,
+	options = {}
+) => {
 	const count = teacherAssignmentCounts.get(teacher.id) ?? 0;
 	if (count >= getTeacherMaxEvents(teacher)) return 'max_events_reached';
 
 	const schedule = Array.isArray(assignedSchedule) ? assignedSchedule : [];
 	if (
 		schedule.some(
-			(assignment) => assignment?.date === event?.date && Array.isArray(assignment?.teachers) && assignment.teachers.includes(teacher.id)
+			(assignment) =>
+				assignment?.date === event?.date &&
+				Array.isArray(assignment?.teachers) &&
+				assignment.teachers.includes(teacher.id)
 		)
 	) {
 		return 'already_assigned_same_day';
@@ -129,8 +167,7 @@ const getTeacherBlockingReason = (teacher, event, assignedSchedule, globalBlacko
 	if (isBlackoutDate(event?.date, globalBlackoutDates)) {
 		return 'global_blackout';
 	}
-	const eventDateObj = event?.date ? new Date(event.date) : null;
-	const weekday = eventDateObj ? eventDateObj.toLocaleDateString('en-US', { weekday: 'long' }) : null;
+	const weekday = getEventWeekday(event);
 	const visitDay = normalizeWeekday(teacher?.visitSchool?.day);
 	if (visitDay && weekday && visitDay === weekday) {
 		return 'visit_school_day';
@@ -150,92 +187,114 @@ const getTeacherBlockingReason = (teacher, event, assignedSchedule, globalBlacko
 	return null;
 };
 
-const buildRankedCandidates = (
+/**
+ * Soft preference weights.
+ * Ward > neighborhood > preferred day > fairness > gender/country.
+ * variationStrength dampens geography so alternate schedules can diverge.
+ */
+const getPreferenceWeights = (variationStrength = 0, { preferPreferredDays = true, prioritizeFairness = true } = {}) => {
+	const dampen = 1 / (1 + Math.max(0, variationStrength) * 0.12);
+	return {
+		ward: 100 * dampen,
+		neighborhood: 40 * dampen,
+		preferredDay: preferPreferredDays ? 10 : 2,
+		fairness: prioritizeFairness ? 8 : 2,
+		gender: 12,
+		country: 6,
+		minimalConstraints: 2,
+		reuse: 4,
+		jitterScale: Math.max(0, variationStrength) * 8,
+	};
+};
+
+/**
+ * Greedy slot fill: re-score each pick so ward/neighborhood stay primary,
+ * while gender/country nudge among similarly strong geographic matches.
+ */
+const selectTeachersForEvent = (
 	availableTeachers,
 	event,
 	teacherAssignmentCounts,
 	previouslyUsed,
 	variationStrength,
 	rng,
-	{ prioritizeFairness = true }
+	{ preferPreferredDays = true, prioritizeFairness = true } = {}
 ) => {
-	const teachersWithScores = availableTeachers.map((teacher) => {
-		const neighborhoodScore = getNeighborhoodScore(teacher?.neighborhood, event?.neighborhoods);
-		const assignmentCount = teacherAssignmentCounts.get(teacher.id) ?? 0;
-		const reusePenalty = previouslyUsed.has(teacher.id) ? variationStrength : 0;
-		const jitter = variationStrength > 0 ? rng() * variationStrength : 0;
-		return {
-			...teacher,
-			neighborhoodScore,
-			assignmentCount,
-			sortKey: neighborhoodScore * 10 - reusePenalty + jitter,
-		};
-	});
-
-	teachersWithScores.sort((a, b) => {
-		if (prioritizeFairness && a.assignmentCount !== b.assignmentCount) {
-			return a.assignmentCount - b.assignmentCount;
-		}
-		if (b.sortKey !== a.sortKey) return b.sortKey - a.sortKey;
-		return a.id - b.id;
-	});
-
-	return teachersWithScores;
-};
-
-const selectTeachersFromCandidates = (
-	teachersWithScores,
-	requiredSlots,
-	{ useGenderBalance, previouslyUsed, variationStrength, rng }
-) => {
-	const selectedTeachers = [];
+	const requiredSlots = resolveRequiredSlots(event);
+	const weights = getPreferenceWeights(variationStrength, { preferPreferredDays, prioritizeFairness });
+	const selected = [];
 	const genderCount = { Male: 0, Female: 0 };
 	const countryCount = new Map();
+	const remaining = [...availableTeachers];
 
-	if (useGenderBalance) {
-		for (const gender of ['Male', 'Female']) {
-			const teachersOfGender = teachersWithScores.filter((t) => t.gender === gender);
-			const targetCount = Math.min(Math.ceil(requiredSlots / 2), teachersOfGender.length);
-			for (let i = 0; i < targetCount && selectedTeachers.length < requiredSlots; i++) {
-				const teacher = teachersOfGender[i];
-				if (teacher) {
-					selectedTeachers.push(teacher.id);
-					genderCount[gender]++;
-					countryCount.set(teacher.country, (countryCount.get(teacher.country) || 0) + 1);
+	while (selected.length < requiredSlots && remaining.length > 0) {
+		const slotsLeft = requiredSlots - selected.length;
+		let bestIndex = 0;
+		let bestScore = -Infinity;
+
+		for (let i = 0; i < remaining.length; i++) {
+			const teacher = remaining[i];
+			const wardScore = getWardScore(teacher.ward, event.ward);
+			const neighborhoodScore = getNeighborhoodScore(teacher.neighborhood, event.neighborhoods);
+			const preferredDayScore = getPreferredDayScore(teacher, event);
+			const assignmentCount = teacherAssignmentCounts.get(teacher.id) ?? 0;
+			const reusePenalty = previouslyUsed.has(teacher.id) ? weights.reuse : 0;
+
+			const maleCount = genderCount.Male || 0;
+			const femaleCount = genderCount.Female || 0;
+			let genderBonus = 0;
+			if (teacher.gender === 'Male' || teacher.gender === 'Female') {
+				if (maleCount === femaleCount) {
+					genderBonus = 0.5;
+				} else if (teacher.gender === 'Male' && maleCount < femaleCount) {
+					genderBonus = 1;
+				} else if (teacher.gender === 'Female' && femaleCount < maleCount) {
+					genderBonus = 1;
+				} else {
+					genderBonus = -0.4;
 				}
+				if (slotsLeft <= 2 && maleCount === 0 && teacher.gender === 'Male') genderBonus += 0.8;
+				if (slotsLeft <= 2 && femaleCount === 0 && teacher.gender === 'Female') genderBonus += 0.8;
+			}
+
+			const countryFreq = countryCount.get(teacher.country) || 0;
+			const countryBonus = selected.length === 0 ? 0 : 1 / (1 + countryFreq);
+			const lazyBonus = teacher.hasMinimalConstraints ? 1 : 0;
+			const jitter = weights.jitterScale > 0 ? rng() * weights.jitterScale : 0;
+
+			const score =
+				wardScore * weights.ward +
+				neighborhoodScore * weights.neighborhood +
+				preferredDayScore * weights.preferredDay -
+				assignmentCount * weights.fairness +
+				genderBonus * weights.gender +
+				countryBonus * weights.country +
+				lazyBonus * weights.minimalConstraints -
+				reusePenalty +
+				jitter;
+
+			if (score > bestScore) {
+				bestScore = score;
+				bestIndex = i;
 			}
 		}
+
+		const chosen = remaining.splice(bestIndex, 1)[0];
+		selected.push(chosen.id);
+		if (chosen.gender) {
+			genderCount[chosen.gender] = (genderCount[chosen.gender] || 0) + 1;
+		}
+		countryCount.set(chosen.country, (countryCount.get(chosen.country) || 0) + 1);
 	}
 
-	const remainingCandidates = teachersWithScores.filter((t) => !selectedTeachers.includes(t.id));
-	remainingCandidates.sort((a, b) => {
-		const aReuse = previouslyUsed.has(a.id) ? variationStrength : 0;
-		const bReuse = previouslyUsed.has(b.id) ? variationStrength : 0;
-		const aLazy = a.hasMinimalConstraints ? 1 : 0;
-		const bLazy = b.hasMinimalConstraints ? 1 : 0;
-		if (bLazy !== aLazy) return bLazy - aLazy;
-		const aCountryCount = (countryCount.get(a.country) || 0) + aReuse;
-		const bCountryCount = (countryCount.get(b.country) || 0) + bReuse;
-		if (aCountryCount !== bCountryCount) return aCountryCount - bCountryCount;
-		if (aReuse !== bReuse) return aReuse - bReuse;
-		const jitterA = variationStrength > 0 ? rng() * 0.5 : 0;
-		const jitterB = variationStrength > 0 ? rng() * 0.5 : 0;
-		return (a.assignmentCount ?? 0) + jitterA - ((b.assignmentCount ?? 0) + jitterB);
-	});
-
-	for (const teacher of remainingCandidates) {
-		if (selectedTeachers.length >= requiredSlots) break;
-		selectedTeachers.push(teacher.id);
-	}
-
-	return selectedTeachers;
+	return selected;
 };
 
 const FILL_STRATEGIES = [
-	{ relaxMonthlySpacing: false, useGenderBalance: true, prioritizeFairness: true, label: 'optimal' },
-	{ relaxMonthlySpacing: false, useGenderBalance: false, prioritizeFairness: true, label: 'relaxed_gender' },
-	{ relaxMonthlySpacing: true, useGenderBalance: false, prioritizeFairness: true, label: 'relaxed_spacing' },
-	{ relaxMonthlySpacing: true, useGenderBalance: false, prioritizeFairness: false, label: 'relaxed_all_soft' },
+	{ relaxMonthlySpacing: false, preferPreferredDays: true, prioritizeFairness: true, label: 'optimal' },
+	{ relaxMonthlySpacing: false, preferPreferredDays: false, prioritizeFairness: true, label: 'relaxed_preferred_days' },
+	{ relaxMonthlySpacing: true, preferPreferredDays: false, prioritizeFairness: true, label: 'relaxed_spacing' },
+	{ relaxMonthlySpacing: true, preferPreferredDays: false, prioritizeFairness: false, label: 'relaxed_all_soft' },
 ];
 
 const assignTeachersToEvent = (
@@ -259,22 +318,18 @@ const assignTeachersToEvent = (
 				}) && (teacherAssignmentCounts.get(teacher.id) ?? 0) < getTeacherMaxEvents(teacher)
 		);
 
-		const ranked = buildRankedCandidates(
+		const selectedTeachers = selectTeachersForEvent(
 			availableTeachers,
 			event,
 			teacherAssignmentCounts,
 			previouslyUsed,
 			variationStrength,
 			rng,
-			{ prioritizeFairness: strategy.prioritizeFairness }
+			{
+				preferPreferredDays: strategy.preferPreferredDays,
+				prioritizeFairness: strategy.prioritizeFairness,
+			}
 		);
-
-		const selectedTeachers = selectTeachersFromCandidates(ranked, requiredSlots, {
-			useGenderBalance: strategy.useGenderBalance,
-			previouslyUsed,
-			variationStrength,
-			rng,
-		});
 
 		if (selectedTeachers.length > bestPartial.teachers.length) {
 			bestPartial = { teachers: selectedTeachers, strategy: strategy.label };
@@ -315,7 +370,7 @@ export const describeEventFillGap = (teachers, event, schedule, globalBlackoutDa
 	const requiredSlots = resolveRequiredSlots(event);
 	const blockerCounts = {};
 
-	teachers.forEach((teacher) => {
+	(Array.isArray(teachers) ? teachers : []).forEach((teacher) => {
 		const reason = getTeacherBlockingReason(
 			teacher,
 			event,
@@ -327,13 +382,13 @@ export const describeEventFillGap = (teachers, event, schedule, globalBlackoutDa
 		if (reason) blockerCounts[reason] = (blockerCounts[reason] || 0) + 1;
 	});
 
-	const strictEligible = teachers.filter(
+	const strictEligible = (teachers || []).filter(
 		(teacher) =>
 			isTeacherAvailable(teacher, event, schedule, globalBlackoutDates, { relaxMonthlySpacing: false }) &&
 			(teacherAssignmentCounts.get(teacher.id) ?? 0) < getTeacherMaxEvents(teacher)
 	).length;
 
-	const relaxedEligible = teachers.filter(
+	const relaxedEligible = (teachers || []).filter(
 		(teacher) =>
 			isTeacherAvailable(teacher, event, schedule, globalBlackoutDates, { relaxMonthlySpacing: true }) &&
 			(teacherAssignmentCounts.get(teacher.id) ?? 0) < getTeacherMaxEvents(teacher)
@@ -342,12 +397,13 @@ export const describeEventFillGap = (teachers, event, schedule, globalBlackoutDa
 	const topBlockers = Object.entries(blockerCounts)
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, 4)
-		.map(([reason, count]) => `${reason} (${count})`)
+		.map(([reason, count]) => `${reason.replace(/_/g, ' ')} (${count})`)
 		.join(', ');
 
 	return {
 		schoolName: event.schoolName,
 		date: event.date,
+		ward: event.ward,
 		requiredSlots,
 		strictEligible,
 		relaxedEligible,
@@ -355,7 +411,6 @@ export const describeEventFillGap = (teachers, event, schedule, globalBlackoutDa
 	};
 };
 
-/** Stable fingerprint for comparing schedules (event → sorted teacher IDs). */
 export const getScheduleFingerprint = (schedule) => {
 	if (!Array.isArray(schedule)) return '';
 	return schedule
@@ -369,10 +424,6 @@ export const getScheduleFingerprint = (schedule) => {
 		.join('|');
 };
 
-/**
- * Build a map of eventId → Set of teacherIds used in prior schedules,
- * so regenerating can prefer different placements.
- */
 const buildPriorAssignmentMap = (previousSchedules) => {
 	const map = new Map();
 	(Array.isArray(previousSchedules) ? previousSchedules : []).forEach((schedule) => {
@@ -386,10 +437,6 @@ const buildPriorAssignmentMap = (previousSchedules) => {
 	return map;
 };
 
-/**
- * Fraction of event slots whose teacher set differs from the most similar prior schedule.
- * 0 = identical to some prior; 1 = every event differs.
- */
 const differenceRatio = (candidate, previousSchedules) => {
 	if (!Array.isArray(candidate) || candidate.length === 0) return 0;
 	if (!previousSchedules?.length) return 1;
@@ -414,13 +461,8 @@ const differenceRatio = (candidate, previousSchedules) => {
 };
 
 /**
- * Generate one schedule. Soft preferences (neighborhood, fairness, gender, country)
- * remain; optional seed + prior schedules nudge placements so alternatives differ.
- *
- * @param {object[]} teachers
- * @param {object[]} events
- * @param {object[]} [globalBlackoutDates]
- * @param {{ seed?: number, previousSchedules?: object[][], variationStrength?: number }} [options]
+ * Soft priorities: ward → neighborhood → preferred day → fairness → gender/country.
+ * Hard: Max, same-day, base school, leader, blackouts, visit day (+ spacing unless relaxed).
  */
 export const generateSchedule = (teachers, events, globalBlackoutDates, options = {}) => {
 	const teacherList = Array.isArray(teachers) ? teachers : [];
@@ -436,7 +478,6 @@ export const generateSchedule = (teachers, events, globalBlackoutDates, options 
 	const schedule = [];
 	const teacherAssignmentCounts = new Map(teacherList.map((t) => [t.id, 0]));
 
-	// Sort events by date
 	const sortedEvents = [...eventList].sort((a, b) => new Date(a?.date || 0) - new Date(b?.date || 0));
 
 	for (const event of sortedEvents) {
@@ -472,14 +513,8 @@ export const generateSchedule = (teachers, events, globalBlackoutDates, options 
 };
 
 const MAX_ATTEMPTS = 40;
-const MIN_DIFFERENCE_RATIO = 0.15; // at least ~15% of events should change teacher sets
+const MIN_DIFFERENCE_RATIO = 0.15;
 
-/**
- * Generate a schedule distinct from previous ones, or null if options are exhausted.
- * First call (no previous) returns the baseline deterministic schedule.
- *
- * @returns {{ schedule: object[] } | { exhausted: true }}
- */
 export const generateDistinctSchedule = (teachers, events, globalBlackoutDates, previousSchedules = []) => {
 	const priors = Array.isArray(previousSchedules) ? previousSchedules : [];
 	const knownFingerprints = new Set(priors.map(getScheduleFingerprint));
@@ -494,7 +529,7 @@ export const generateDistinctSchedule = (teachers, events, globalBlackoutDates, 
 	}
 
 	for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-		const variationStrength = 1.5 + attempt * 0.35;
+		const variationStrength = 1.5 + attempt * 0.45;
 		const seed = Date.now() + attempt * 9973;
 		const schedule = generateSchedule(teachers, events, globalBlackoutDates, {
 			seed,
