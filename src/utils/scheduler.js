@@ -190,26 +190,39 @@ const getTeacherBlockingReason = (
 /**
  * Soft preference weights.
  * Ward > neighborhood > preferred day > fairness > gender/country.
- * variationStrength dampens geography so alternate schedules can diverge.
+ * Half-day events get a much stronger ward weight (avoid long cross-ward commutes).
+ * variationStrength dampens geography so alternate schedules can diverge — less so for half-days.
  */
-const getPreferenceWeights = (variationStrength = 0, { preferPreferredDays = true, prioritizeFairness = true } = {}) => {
-	const dampen = 1 / (1 + Math.max(0, variationStrength) * 0.12);
+const isHalfDayEvent = (event) => {
+	const length = toLower(event?.length);
+	return length.includes('half');
+};
+
+const getPreferenceWeights = (
+	variationStrength = 0,
+	{ preferPreferredDays = true, prioritizeFairness = true, halfDay = false } = {}
+) => {
+	// Half-day: keep ward preference sticky even when generating alternatives
+	const dampenFactor = halfDay ? 0.05 : 0.12;
+	const dampen = 1 / (1 + Math.max(0, variationStrength) * dampenFactor);
+	const wardBase = halfDay ? 280 : 100;
 	return {
-		ward: 100 * dampen,
-		neighborhood: 40 * dampen,
+		ward: wardBase * dampen,
+		neighborhood: (halfDay ? 25 : 40) * dampen,
 		preferredDay: preferPreferredDays ? 10 : 2,
 		fairness: prioritizeFairness ? 8 : 2,
-		gender: 12,
-		country: 6,
+		gender: halfDay ? 8 : 12,
+		country: halfDay ? 4 : 6,
 		minimalConstraints: 2,
 		reuse: 4,
-		jitterScale: Math.max(0, variationStrength) * 8,
+		jitterScale: Math.max(0, variationStrength) * (halfDay ? 4 : 8),
 	};
 };
 
 /**
  * Greedy slot fill: re-score each pick so ward/neighborhood stay primary,
  * while gender/country nudge among similarly strong geographic matches.
+ * Half-day events strongly prefer same-ward members.
  */
 const selectTeachersForEvent = (
 	availableTeachers,
@@ -218,14 +231,28 @@ const selectTeachersForEvent = (
 	previouslyUsed,
 	variationStrength,
 	rng,
-	{ preferPreferredDays = true, prioritizeFairness = true } = {}
+	{ preferPreferredDays = true, prioritizeFairness = true, requireSameWard = false } = {}
 ) => {
 	const requiredSlots = resolveRequiredSlots(event);
-	const weights = getPreferenceWeights(variationStrength, { preferPreferredDays, prioritizeFairness });
+	const halfDay = isHalfDayEvent(event);
+	const weights = getPreferenceWeights(variationStrength, {
+		preferPreferredDays,
+		prioritizeFairness,
+		halfDay,
+	});
+
+	let pool = availableTeachers;
+	if (requireSameWard && event?.ward) {
+		const sameWard = availableTeachers.filter((t) => getWardScore(t.ward, event.ward) === 1);
+		if (sameWard.length > 0) {
+			pool = sameWard;
+		}
+	}
+
 	const selected = [];
 	const genderCount = { Male: 0, Female: 0 };
 	const countryCount = new Map();
-	const remaining = [...availableTeachers];
+	const remaining = [...pool];
 
 	while (selected.length < requiredSlots && remaining.length > 0) {
 		const slotsLeft = requiredSlots - selected.length;
@@ -290,12 +317,48 @@ const selectTeachersForEvent = (
 	return selected;
 };
 
-const FILL_STRATEGIES = [
-	{ relaxMonthlySpacing: false, preferPreferredDays: true, prioritizeFairness: true, label: 'optimal' },
-	{ relaxMonthlySpacing: false, preferPreferredDays: false, prioritizeFairness: true, label: 'relaxed_preferred_days' },
-	{ relaxMonthlySpacing: true, preferPreferredDays: false, prioritizeFairness: true, label: 'relaxed_spacing' },
-	{ relaxMonthlySpacing: true, preferPreferredDays: false, prioritizeFairness: false, label: 'relaxed_all_soft' },
-];
+const getFillStrategies = (event) => {
+	if (isHalfDayEvent(event)) {
+		// Half-day: exhaust same-ward options before allowing cross-ward exceptions
+		return [
+			{
+				relaxMonthlySpacing: false,
+				preferPreferredDays: true,
+				prioritizeFairness: true,
+				requireSameWard: true,
+				label: 'halfday_ward_only',
+			},
+			{
+				relaxMonthlySpacing: false,
+				preferPreferredDays: false,
+				prioritizeFairness: true,
+				requireSameWard: true,
+				label: 'halfday_ward_relaxed_days',
+			},
+			{
+				relaxMonthlySpacing: true,
+				preferPreferredDays: false,
+				prioritizeFairness: true,
+				requireSameWard: true,
+				label: 'halfday_ward_relaxed_spacing',
+			},
+			{
+				relaxMonthlySpacing: true,
+				preferPreferredDays: false,
+				prioritizeFairness: false,
+				requireSameWard: false,
+				label: 'halfday_cross_ward_fallback',
+			},
+		];
+	}
+
+	return [
+		{ relaxMonthlySpacing: false, preferPreferredDays: true, prioritizeFairness: true, requireSameWard: false, label: 'optimal' },
+		{ relaxMonthlySpacing: false, preferPreferredDays: false, prioritizeFairness: true, requireSameWard: false, label: 'relaxed_preferred_days' },
+		{ relaxMonthlySpacing: true, preferPreferredDays: false, prioritizeFairness: true, requireSameWard: false, label: 'relaxed_spacing' },
+		{ relaxMonthlySpacing: true, preferPreferredDays: false, prioritizeFairness: false, requireSameWard: false, label: 'relaxed_all_soft' },
+	];
+};
 
 const assignTeachersToEvent = (
 	event,
@@ -309,8 +372,9 @@ const assignTeachersToEvent = (
 ) => {
 	const requiredSlots = resolveRequiredSlots(event);
 	let bestPartial = { teachers: [], strategy: null };
+	const strategies = getFillStrategies(event);
 
-	for (const strategy of FILL_STRATEGIES) {
+	for (const strategy of strategies) {
 		const availableTeachers = teacherList.filter(
 			(teacher) =>
 				isTeacherAvailable(teacher, event, schedule, globalBlackoutDates, {
@@ -328,6 +392,7 @@ const assignTeachersToEvent = (
 			{
 				preferPreferredDays: strategy.preferPreferredDays,
 				prioritizeFairness: strategy.prioritizeFairness,
+				requireSameWard: strategy.requireSameWard,
 			}
 		);
 
@@ -339,7 +404,7 @@ const assignTeachersToEvent = (
 			return {
 				teachers: selectedTeachers,
 				requiredSlots,
-				suboptimalFill: strategy.label !== 'optimal',
+				suboptimalFill: strategy.label !== 'optimal' && strategy.label !== 'halfday_ward_only',
 				partialFill: false,
 				fillStrategy: strategy.label,
 			};
