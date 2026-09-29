@@ -68,6 +68,12 @@ const ScheduleTable = ({ schedule, teachers }) => (
 
           const fillLabel = assignment.partialFill
             ? `Partial (${assignment.teachers.length}/${assignment.targetSlots ?? '?'})`
+            : assignment.fillStrategy === 'halfday_cross_ward_fallback'
+            ? 'Half-day: cross-ward fallback'
+            : assignment.fillStrategy === 'halfday_ward_relaxed_days'
+            ? 'Half-day: same ward (non-preferred days)'
+            : assignment.fillStrategy === 'halfday_ward_relaxed_spacing'
+            ? 'Half-day: same ward (relaxed spacing)'
             : assignment.fillStrategy === 'relaxed_preferred_days'
             ? 'Non-preferred days used'
             : assignment.fillStrategy === 'relaxed_spacing'
